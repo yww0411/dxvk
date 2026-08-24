@@ -27,11 +27,53 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <iomanip>
 #ifdef MSC_VER
 #pragma fenv_access (on)
 #endif
 
 namespace dxvk {
+
+#ifdef _WIN32
+  static void LogNg3reWindowsStack(const char* reason) {
+    constexpr USHORT MaxFrames = 32;
+    void* frames[MaxFrames] = { };
+
+    USHORT frameCount = CaptureStackBackTrace(
+      0, MaxFrames, frames, nullptr);
+
+    Logger::info(str::format(
+      "NG3RE_STACK: reason=", reason,
+      "; frames=", frameCount));
+
+    for (USHORT i = 0; i < frameCount; i++) {
+      uintptr_t address = reinterpret_cast<uintptr_t>(frames[i]);
+      HMODULE module = nullptr;
+
+      std::stringstream line;
+      line << "NG3RE_STACK[" << i << "]: ";
+
+      if (GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+          | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCSTR>(frames[i]),
+            &module)) {
+        char modulePath[MAX_PATH] = { };
+        GetModuleFileNameA(module, modulePath, MAX_PATH - 1);
+
+        uintptr_t moduleBase = reinterpret_cast<uintptr_t>(module);
+        line << (modulePath[0] ? modulePath : "<unnamed module>")
+             << "+0x" << std::hex << (address - moduleBase)
+             << " [0x" << address << "]";
+      } else {
+        line << "<unknown module> [0x"
+             << std::hex << address << "]";
+      }
+
+      Logger::info(line.str());
+    }
+  }
+#endif
 
   static const char* GetNg3reQueryTypeName(D3DQUERYTYPE type) {
     switch (type) {
@@ -254,6 +296,9 @@ namespace dxvk {
       Logger::info(str::format(
         "NG3RE_LIFECYCLE: first IDirect3DDevice9::Release after reset; references before release=",
         m_refCount.load()));
+#ifdef _WIN32
+      LogNg3reWindowsStack("first IDirect3DDevice9::Release after reset");
+#endif
     }
 
     return ComObjectClamp<IDirect3DDevice9Ex>::Release();
