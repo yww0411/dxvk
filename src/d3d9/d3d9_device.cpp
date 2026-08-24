@@ -484,6 +484,7 @@ namespace dxvk {
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::Reset(D3DPRESENT_PARAMETERS* pPresentationParameters) {
     D3D9DeviceLock lock = LockDevice();
 
+    Logger::info("NG3RE_TRACE: D3D9DeviceEx::Reset entered");
     Logger::info("Device reset");
     m_deviceLostState = D3D9DeviceLostState::Ok;
 
@@ -491,11 +492,19 @@ namespace dxvk {
     // Black Desert creates a D3DDEVTYPE_NULLREF device and
     // expects reset to work despite passing invalid parameters.
     if (likely(m_deviceType != D3DDEVTYPE_NULLREF)) {
+      Logger::info("NG3RE_TRACE: Reset ValidatePresentationParameters begin");
       hr = m_parent->ValidatePresentationParameters(pPresentationParameters);
+      Logger::info(str::format("NG3RE_TRACE: Reset ValidatePresentationParameters returned ", hr));
 
-      if (unlikely(FAILED(hr)))
+      if (unlikely(FAILED(hr))) {
+        Logger::info("NG3RE_TRACE: Reset returning validation failure");
         return hr;
+      }
     }
+
+    Logger::info(str::format(
+      "NG3RE_TRACE: Reset state cleanup begin; extended=",
+      IsExtended() ? "true" : "false"));
 
     if (!IsExtended()) {
       // The internal references are always cleared, regardless of whether the Reset call succeeds.
@@ -533,7 +542,11 @@ namespace dxvk {
       SetDepthStencilSurface(nullptr);
     }
 
+    Logger::info("NG3RE_TRACE: Reset state cleanup completed");
     m_cursor.ResetCursor();
+    Logger::info(str::format(
+      "NG3RE_TRACE: Reset cursor reset completed; losable resources=",
+      m_losableResourceCounter.load()));
 
     /*
       * Before calling the IDirect3DDevice9::Reset method for a device,
@@ -551,21 +564,28 @@ namespace dxvk {
       return m_isD3D8Compatible ? D3DERR_DEVICELOST : D3DERR_INVALIDCALL;
     }
 
+    Logger::info("NG3RE_TRACE: Reset ResetSwapChain begin");
     hr = ResetSwapChain(pPresentationParameters, nullptr);
+    Logger::info(str::format("NG3RE_TRACE: Reset ResetSwapChain returned ", hr));
     if (unlikely(FAILED(hr))) {
       if (!IsExtended()) {
         Logger::warn("Device reset failed: Device not reset");
         m_deviceLostState = D3D9DeviceLostState::NotReset;
       }
+      Logger::info("NG3RE_TRACE: Reset returning ResetSwapChain failure");
       return hr;
     }
 
+    Logger::info("NG3RE_TRACE: Reset Flush begin");
     Flush();
+    Logger::info("NG3RE_TRACE: Reset SynchronizeCsThread begin");
     SynchronizeCsThread(DxvkCsThread::SynchronizeAll);
+    Logger::info("NG3RE_TRACE: Reset SynchronizeCsThread completed");
 
     if (m_d3d9Options.deferSurfaceCreation)
       m_resetCtr++;
 
+    Logger::info("NG3RE_TRACE: D3D9DeviceEx::Reset returning D3D_OK");
     return D3D_OK;
   }
 
@@ -4418,18 +4438,29 @@ namespace dxvk {
           D3DDISPLAYMODEEX*      pFullscreenDisplayMode) {
     D3D9DeviceLock lock = LockDevice();
 
+    Logger::info("NG3RE_TRACE: D3D9DeviceEx::ResetEx entered");
+
     HRESULT hr;
     if (likely(m_deviceType != D3DDEVTYPE_NULLREF)) {
+      Logger::info("NG3RE_TRACE: ResetEx ValidatePresentationParametersEx begin");
       hr = m_parent->ValidatePresentationParametersEx(pPresentationParameters, pFullscreenDisplayMode);
+      Logger::info(str::format("NG3RE_TRACE: ResetEx ValidatePresentationParametersEx returned ", hr));
 
-      if (unlikely(FAILED(hr)))
+      if (unlikely(FAILED(hr))) {
+        Logger::info("NG3RE_TRACE: ResetEx returning validation failure");
         return hr;
+      }
     }
 
+    Logger::info("NG3RE_TRACE: ResetEx ResetSwapChain begin");
     hr = ResetSwapChain(pPresentationParameters, pFullscreenDisplayMode);
-    if (FAILED(hr))
+    Logger::info(str::format("NG3RE_TRACE: ResetEx ResetSwapChain returned ", hr));
+    if (FAILED(hr)) {
+      Logger::info("NG3RE_TRACE: ResetEx returning ResetSwapChain failure");
       return hr;
+    }
 
+    Logger::info("NG3RE_TRACE: D3D9DeviceEx::ResetEx returning D3D_OK");
     return D3D_OK;
   }
 
@@ -8687,6 +8718,10 @@ namespace dxvk {
 
 
   HRESULT D3D9DeviceEx::ResetSwapChain(D3DPRESENT_PARAMETERS* pPresentationParameters, D3DDISPLAYMODEEX* pFullscreenDisplayMode) {
+    Logger::info(str::format(
+      "NG3RE_TRACE: D3D9DeviceEx::ResetSwapChain entered; implicit swapchain=",
+      m_implicitSwapchain != nullptr ? "present" : "missing"));
+
     D3D9Format backBufferFmt = EnumerateFormat(pPresentationParameters->BackBufferFormat);
     bool unlockedFormats = m_implicitSwapchain != nullptr && m_implicitSwapchain->HasFormatsUnlocked();
 
@@ -8719,16 +8754,23 @@ namespace dxvk {
     }
 
     if (m_implicitSwapchain != nullptr) {
+      Logger::info("NG3RE_TRACE: ResetSwapChain implicit swapchain Reset begin");
       HRESULT hr = m_implicitSwapchain->Reset(pPresentationParameters, pFullscreenDisplayMode);
-      if (FAILED(hr))
+      Logger::info(str::format("NG3RE_TRACE: ResetSwapChain implicit swapchain Reset returned ", hr));
+      if (FAILED(hr)) {
+        Logger::info("NG3RE_TRACE: ResetSwapChain returning implicit swapchain failure");
         return hr;
+      }
     }
     else {
+      Logger::info("NG3RE_TRACE: ResetSwapChain implicit swapchain construction begin");
       m_implicitSwapchain = new D3D9SwapChainEx(this, pPresentationParameters, pFullscreenDisplayMode, true);
       m_mostRecentlyUsedSwapchain = m_implicitSwapchain.ptr();
+      Logger::info("NG3RE_TRACE: ResetSwapChain implicit swapchain construction completed");
     }
 
     if (pPresentationParameters->EnableAutoDepthStencil) {
+      Logger::info("NG3RE_TRACE: ResetSwapChain auto depth-stencil creation begin");
       D3D9_COMMON_TEXTURE_DESC desc;
       desc.Width              = pPresentationParameters->BackBufferWidth;
       desc.Height             = pPresentationParameters->BackBufferHeight;
@@ -8745,15 +8787,22 @@ namespace dxvk {
       desc.IsAttachmentOnly   = TRUE;
       desc.IsLockable         = IsLockableDepthStencilFormat(desc.Format);
 
-      if (FAILED(D3D9CommonTexture::NormalizeTextureProperties(this, D3DRTYPE_SURFACE, &desc)))
+      if (FAILED(D3D9CommonTexture::NormalizeTextureProperties(this, D3DRTYPE_SURFACE, &desc))) {
+        Logger::info("NG3RE_TRACE: ResetSwapChain auto depth-stencil normalization failed");
         return D3DERR_NOTAVAILABLE;
+      }
 
+      Logger::info("NG3RE_TRACE: ResetSwapChain auto depth-stencil surface allocation begin");
       m_autoDepthStencil = new D3D9Surface(this, &desc, IsExtended(), nullptr, nullptr);
+      Logger::info("NG3RE_TRACE: ResetSwapChain auto depth-stencil surface allocation completed");
       m_initializer->InitTexture(m_autoDepthStencil->GetCommonTexture());
+      Logger::info("NG3RE_TRACE: ResetSwapChain auto depth-stencil initialization completed");
       SetDepthStencilSurface(m_autoDepthStencil.ptr());
       m_losableResourceCounter++;
+      Logger::info("NG3RE_TRACE: ResetSwapChain auto depth-stencil creation completed");
     }
 
+    Logger::info("NG3RE_TRACE: ResetSwapChain render-target binding begin");
     if (!IsExtended()) {
       SetRenderTarget(0, m_implicitSwapchain->GetBackBuffer(0));
     } else {
@@ -8767,24 +8816,35 @@ namespace dxvk {
       m_state.viewport.MinZ = MinZ;
       m_state.viewport.MaxZ = MaxZ;
     }
+    Logger::info("NG3RE_TRACE: ResetSwapChain render-target binding completed");
 
     // Force this if we end up binding the same RT to make scissor change go into effect.
     BindViewportAndScissor();
 
+    Logger::info("NG3RE_TRACE: D3D9DeviceEx::ResetSwapChain returning D3D_OK");
     return D3D_OK;
   }
 
 
   HRESULT D3D9DeviceEx::InitialReset(D3DPRESENT_PARAMETERS* pPresentationParameters, D3DDISPLAYMODEEX* pFullscreenDisplayMode) {
+    Logger::info("NG3RE_TRACE: D3D9DeviceEx::InitialReset entered");
     ResetState(pPresentationParameters);
 
+    Logger::info("NG3RE_TRACE: InitialReset ResetSwapChain begin");
     HRESULT hr = ResetSwapChain(pPresentationParameters, pFullscreenDisplayMode);
-    if (FAILED(hr))
+    Logger::info(str::format("NG3RE_TRACE: InitialReset ResetSwapChain returned ", hr));
+    if (FAILED(hr)) {
+      Logger::info("NG3RE_TRACE: InitialReset returning ResetSwapChain failure");
       return hr;
+    }
 
+    Logger::info("NG3RE_TRACE: InitialReset Flush begin");
     Flush();
+    Logger::info("NG3RE_TRACE: InitialReset SynchronizeCsThread begin");
     SynchronizeCsThread(DxvkCsThread::SynchronizeAll);
+    Logger::info("NG3RE_TRACE: InitialReset SynchronizeCsThread completed");
 
+    Logger::info("NG3RE_TRACE: D3D9DeviceEx::InitialReset returning D3D_OK");
     return D3D_OK;
   }
 

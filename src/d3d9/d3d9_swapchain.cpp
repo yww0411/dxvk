@@ -621,11 +621,22 @@ namespace dxvk {
           D3DDISPLAYMODEEX*      pFullscreenDisplayMode) {
     D3D9DeviceLock lock = m_parent->LockDevice();
 
+    Logger::info("NG3RE_TRACE: D3D9SwapChainEx::Reset entered");
+
     HRESULT hr = D3D_OK;
 
+    Logger::info("NG3RE_TRACE: SwapChain Reset NormalizePresentParameters begin");
     this->NormalizePresentParameters(pPresentParams);
+    Logger::info(str::format(
+      "NG3RE_TRACE: SwapChain Reset NormalizePresentParameters completed; size=",
+      pPresentParams->BackBufferWidth, "x", pPresentParams->BackBufferHeight,
+      ", buffers=", pPresentParams->BackBufferCount,
+      ", windowed=", pPresentParams->Windowed ? "true" : "false"));
 
     bool changeFullscreen = m_presentParams.Windowed != pPresentParams->Windowed;
+    Logger::info(str::format(
+      "NG3RE_TRACE: SwapChain Reset fullscreen transition begin; changed=",
+      changeFullscreen ? "true" : "false"));
 
     if (pPresentParams->Windowed) {
       if (changeFullscreen)
@@ -651,17 +662,26 @@ namespace dxvk {
       }
     }
 
+    Logger::info("NG3RE_TRACE: SwapChain Reset fullscreen transition completed");
+
     m_presentParams = *pPresentParams;
 
     if (changeFullscreen)
       SetGammaRamp(0, &m_ramp);
 
+    Logger::info("NG3RE_TRACE: SwapChain Reset UpdatePresentParameters begin");
     UpdatePresentParameters();
+    Logger::info("NG3RE_TRACE: SwapChain Reset UpdatePresentParameters completed");
 
+    Logger::info("NG3RE_TRACE: SwapChain Reset CreateBackBuffers begin");
     hr = CreateBackBuffers(m_presentParams.BackBufferCount, m_presentParams.Flags);
-    if (FAILED(hr))
+    Logger::info(str::format("NG3RE_TRACE: SwapChain Reset CreateBackBuffers returned ", hr));
+    if (FAILED(hr)) {
+      Logger::info("NG3RE_TRACE: SwapChain Reset returning CreateBackBuffers failure");
       return hr;
+    }
 
+    Logger::info("NG3RE_TRACE: D3D9SwapChainEx::Reset returning D3D_OK");
     return D3D_OK;
   }
 
@@ -1013,9 +1033,15 @@ namespace dxvk {
 
 
   HRESULT D3D9SwapChainEx::CreateBackBuffers(uint32_t NumBackBuffers, DWORD Flags) {
+    Logger::info(str::format(
+      "NG3RE_TRACE: CreateBackBuffers entered; requested=", NumBackBuffers,
+      ", existing=", m_backBuffers.size(), ", flags=", Flags));
+
     // Explicitly destroy current swap image before
     // creating a new one to free up resources
+    Logger::info("NG3RE_TRACE: CreateBackBuffers DestroyBackBuffers begin");
     DestroyBackBuffers();
+    Logger::info("NG3RE_TRACE: CreateBackBuffers DestroyBackBuffers completed");
 
     const uint32_t frontBufferCount = (SwapWithFrontBuffer() || m_parent->GetOptions()->extraFrontbuffer) ? 1 : 0;
     const uint32_t bufferCount = NumBackBuffers + frontBufferCount;
@@ -1043,6 +1069,7 @@ namespace dxvk {
     desc.IsLockable         = true;
 
     for (uint32_t i = 0; i < bufferCount; i++) {
+      Logger::info(str::format("NG3RE_TRACE: CreateBackBuffers surface allocation begin; index=", i));
       D3D9Surface* surface;
       try {
         surface = new D3D9Surface(m_parent, &desc, m_parent->IsExtended(), this, nullptr);
@@ -1050,11 +1077,15 @@ namespace dxvk {
       } catch (const DxvkError& e) {
         DestroyBackBuffers();
         Logger::err(e.message());
+        Logger::info(str::format("NG3RE_TRACE: CreateBackBuffers surface allocation failed; index=", i));
         return D3DERR_OUTOFVIDEOMEMORY;
       }
 
       m_backBuffers.emplace_back(surface);
+      Logger::info(str::format("NG3RE_TRACE: CreateBackBuffers surface allocation completed; index=", i));
     }
+
+    Logger::info("NG3RE_TRACE: CreateBackBuffers all surface allocations completed");
 
     // Initialize the image so that we can use it. Clearing
     // to black prevents garbled output for the first frame.
@@ -1063,6 +1094,7 @@ namespace dxvk {
     for (size_t i = 0; i < m_backBuffers.size(); i++)
       images.push_back(m_backBuffers[i]->GetCommonTexture()->GetImage());
 
+    Logger::info("NG3RE_TRACE: CreateBackBuffers InjectCs begin");
     m_parent->InjectCs([
       cImages = std::move(images)
     ] (DxvkContext* ctx) {
@@ -1070,7 +1102,9 @@ namespace dxvk {
         ctx->initImage(cImages[i], VK_IMAGE_LAYOUT_UNDEFINED);
       }
     });
+    Logger::info("NG3RE_TRACE: CreateBackBuffers InjectCs queued");
 
+    Logger::info("NG3RE_TRACE: CreateBackBuffers returning D3D_OK");
     return D3D_OK;
   }
 
