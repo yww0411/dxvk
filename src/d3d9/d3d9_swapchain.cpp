@@ -45,6 +45,8 @@ namespace dxvk {
 
 
   D3D9SwapChainEx::~D3D9SwapChainEx() {
+    Logger::info("NG3RE_LIFECYCLE: D3D9SwapChainEx destructor entered");
+
     // Avoids hanging when in this state, see comment
     // in DxvkDevice::~DxvkDevice.
     if (this_thread::isInModuleDetachment())
@@ -61,11 +63,6 @@ namespace dxvk {
     }
 
     DestroyBackBuffers();
-
-    for (auto& backBuffer : m_retiredBackBuffers)
-      backBuffer->ClearContainer();
-
-    m_retiredBackBuffers.clear();
 
     ResetWindowProc(m_window);
     RestoreDisplayMode(m_monitor);
@@ -1010,20 +1007,6 @@ namespace dxvk {
       backBuffer->ClearContainer();
 
     m_backBuffers.clear();
-  }
-
-
-  bool D3D9SwapChainEx::RetireBackBuffersForReset() {
-    if (m_backBuffers.empty() || !m_retiredBackBuffers.empty())
-      return false;
-
-    Logger::info(str::format(
-      "NG3RE_COMPAT: Retaining first implicit back-buffer generation; count=",
-      m_backBuffers.size()));
-
-    m_retiredBackBuffers = std::move(m_backBuffers);
-    m_backBuffers.clear();
-    return true;
   }
 
 

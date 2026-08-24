@@ -12,6 +12,12 @@ namespace dxvk {
   Logger Logger::s_instance("d3d9.log");
   D3D9GlobalAnnotationList D3D9GlobalAnnotationList::s_instance;
 
+  struct Ng3reModuleExitTrace {
+    ~Ng3reModuleExitTrace() {
+      Logger::info("NG3RE_LIFECYCLE: d3d9 module static destruction entered");
+    }
+  } g_ng3reModuleExitTrace;
+
   HRESULT CreateD3D9(
           bool           Extended,
           IDirect3D9Ex** ppDirect3D9Ex,

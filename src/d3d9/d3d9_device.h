@@ -243,6 +243,10 @@ namespace dxvk {
 
     ~D3D9DeviceEx();
 
+    ULONG STDMETHODCALLTYPE AddRef();
+
+    ULONG STDMETHODCALLTYPE Release();
+
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObject);
 
     HRESULT STDMETHODCALLTYPE TestCooperativeLevel();
@@ -1563,6 +1567,8 @@ namespace dxvk {
 
     GpuFlushType GetMaxFlushType() const;
 
+    void TracePostResetCall(const char* name);
+
     Com<D3D9InterfaceEx>            m_parent;
     D3DDEVTYPE                      m_deviceType;
     HWND                            m_window;
@@ -1679,6 +1685,9 @@ namespace dxvk {
     D3D9DeviceLostState             m_deviceLostState          = D3D9DeviceLostState::Ok;
     HWND                            m_fullscreenWindow         = NULL;
     std::atomic<uint32_t>           m_losableResourceCounter   = { 0 };
+
+    std::atomic<bool>               m_ng3rePostResetTraceActive = { false };
+    std::atomic<uint32_t>           m_ng3rePostResetTraceCount  = { 0 };
 
     D3D9SwapChainEx*                m_mostRecentlyUsedSwapchain = nullptr;
 

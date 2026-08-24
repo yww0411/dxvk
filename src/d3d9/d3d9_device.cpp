@@ -194,6 +194,10 @@ namespace dxvk {
 
 
   D3D9DeviceEx::~D3D9DeviceEx() {
+    Logger::info(str::format(
+      "NG3RE_LIFECYCLE: D3D9DeviceEx destructor entered; post-reset calls=",
+      m_ng3rePostResetTraceCount.load()));
+
     // Avoids hanging when in this state, see comment
     // in DxvkDevice::~DxvkDevice.
     if (this_thread::isInModuleDetachment())
@@ -212,7 +216,36 @@ namespace dxvk {
   }
 
 
+  ULONG STDMETHODCALLTYPE D3D9DeviceEx::AddRef() {
+    TracePostResetCall("IDirect3DDevice9::AddRef");
+    return ComObjectClamp<IDirect3DDevice9Ex>::AddRef();
+  }
+
+
+  ULONG STDMETHODCALLTYPE D3D9DeviceEx::Release() {
+    TracePostResetCall("IDirect3DDevice9::Release");
+    return ComObjectClamp<IDirect3DDevice9Ex>::Release();
+  }
+
+
+  void D3D9DeviceEx::TracePostResetCall(const char* name) {
+    if (!m_ng3rePostResetTraceActive.load())
+      return;
+
+    uint32_t index = m_ng3rePostResetTraceCount.fetch_add(1);
+
+    if (index < 4096) {
+      Logger::info(str::format(
+        "NG3RE_POST_RESET[", index, "]: ", name));
+    } else if (index == 4096) {
+      Logger::info("NG3RE_POST_RESET: trace limit reached");
+    }
+  }
+
+
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::QueryInterface(REFIID riid, void** ppvObject) {
+    TracePostResetCall("IDirect3DDevice9::QueryInterface");
+
     if (ppvObject == nullptr)
       return E_POINTER;
 
@@ -262,6 +295,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::TestCooperativeLevel() {
+    TracePostResetCall("IDirect3DDevice9::TestCooperativeLevel");
     D3D9DeviceLock lock = LockDevice();
 
     // Equivelant of D3D11/DXGI present tests. We can always present.
@@ -276,6 +310,7 @@ namespace dxvk {
 
 
   UINT    STDMETHODCALLTYPE D3D9DeviceEx::GetAvailableTextureMem() {
+    TracePostResetCall("IDirect3DDevice9::GetAvailableTextureMem");
     // This is not meant to be accurate.
     // The values are also wildly incorrect in d3d9... But some games rely
     // on this inaccurate value...
@@ -292,11 +327,13 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::EvictManagedResources() {
+    TracePostResetCall("IDirect3DDevice9::EvictManagedResources");
     return D3D_OK;
   }
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::GetDirect3D(IDirect3D9** ppD3D9) {
+    TracePostResetCall("IDirect3DDevice9::GetDirect3D");
     if (ppD3D9 == nullptr)
       return D3DERR_INVALIDCALL;
 
@@ -306,6 +343,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::GetDeviceCaps(D3DCAPS9* pCaps) {
+    TracePostResetCall("IDirect3DDevice9::GetDeviceCaps");
     if (pCaps == nullptr)
       return D3DERR_INVALIDCALL;
 
@@ -319,6 +357,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::GetDisplayMode(UINT iSwapChain, D3DDISPLAYMODE* pMode) {
+    TracePostResetCall("IDirect3DDevice9::GetDisplayMode");
     if (unlikely(iSwapChain != 0))
       return D3DERR_INVALIDCALL;
 
@@ -327,6 +366,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::GetCreationParameters(D3DDEVICE_CREATION_PARAMETERS *pParameters) {
+    TracePostResetCall("IDirect3DDevice9::GetCreationParameters");
     if (pParameters == nullptr)
       return D3DERR_INVALIDCALL;
 
@@ -456,6 +496,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::GetSwapChain(UINT iSwapChain, IDirect3DSwapChain9** pSwapChain) {
+    TracePostResetCall("IDirect3DDevice9::GetSwapChain");
     D3D9DeviceLock lock = LockDevice();
 
     InitReturnPtr(pSwapChain);
@@ -475,6 +516,7 @@ namespace dxvk {
 
 
   UINT    STDMETHODCALLTYPE D3D9DeviceEx::GetNumberOfSwapChains() {
+    TracePostResetCall("IDirect3DDevice9::GetNumberOfSwapChains");
     // This only counts the implicit swapchain...
 
     return 1;
@@ -509,8 +551,7 @@ namespace dxvk {
     if (!IsExtended()) {
       // The internal references are always cleared, regardless of whether the Reset call succeeds.
       ResetState(pPresentationParameters);
-      if (!m_implicitSwapchain->RetireBackBuffersForReset())
-        m_implicitSwapchain->DestroyBackBuffers();
+      m_implicitSwapchain->DestroyBackBuffers();
       m_autoDepthStencil = nullptr;
 
       // Unbind all buffers that were still bound to the backend to avoid leaks.
@@ -586,7 +627,9 @@ namespace dxvk {
     if (m_d3d9Options.deferSurfaceCreation)
       m_resetCtr++;
 
-    Logger::info("NG3RE_TRACE: D3D9DeviceEx::Reset returning D3D_OK");
+    m_ng3rePostResetTraceCount.store(0);
+    m_ng3rePostResetTraceActive.store(true);
+    Logger::info("NG3RE_TRACE: D3D9DeviceEx::Reset returning D3D_OK; post-reset call trace enabled");
     return D3D_OK;
   }
 
@@ -596,6 +639,7 @@ namespace dxvk {
     const RECT*    pDestRect,
           HWND     hDestWindowOverride,
     const RGNDATA* pDirtyRegion) {
+    TracePostResetCall("IDirect3DDevice9::Present");
     return PresentEx(
       pSourceRect,
       pDestRect,
@@ -610,6 +654,7 @@ namespace dxvk {
           UINT                iBackBuffer,
           D3DBACKBUFFER_TYPE  Type,
           IDirect3DSurface9** ppBackBuffer) {
+    TracePostResetCall("IDirect3DDevice9::GetBackBuffer");
     InitReturnPtr(ppBackBuffer);
 
     if (unlikely(iSwapChain != 0))
@@ -660,6 +705,7 @@ namespace dxvk {
           D3DPOOL             Pool,
           IDirect3DTexture9** ppTexture,
           HANDLE*             pSharedHandle) {
+    TracePostResetCall("IDirect3DDevice9::CreateTexture");
     InitReturnPtr(ppTexture);
 
     if (unlikely(ppTexture == nullptr))
@@ -730,6 +776,7 @@ namespace dxvk {
           D3DPOOL                   Pool,
           IDirect3DVolumeTexture9** ppVolumeTexture,
           HANDLE*                   pSharedHandle) {
+    TracePostResetCall("IDirect3DDevice9::CreateVolumeTexture");
     InitReturnPtr(ppVolumeTexture);
 
     if (unlikely(ppVolumeTexture == nullptr))
@@ -791,6 +838,7 @@ namespace dxvk {
           D3DPOOL                 Pool,
           IDirect3DCubeTexture9** ppCubeTexture,
           HANDLE*                 pSharedHandle) {
+    TracePostResetCall("IDirect3DDevice9::CreateCubeTexture");
     InitReturnPtr(ppCubeTexture);
 
     if (unlikely(ppCubeTexture == nullptr))
@@ -851,6 +899,7 @@ namespace dxvk {
           D3DPOOL                  Pool,
           IDirect3DVertexBuffer9** ppVertexBuffer,
           HANDLE*                  pSharedHandle) {
+    TracePostResetCall("IDirect3DDevice9::CreateVertexBuffer");
     InitReturnPtr(ppVertexBuffer);
 
     if (unlikely(ppVertexBuffer == nullptr))
@@ -898,6 +947,7 @@ namespace dxvk {
           D3DPOOL                 Pool,
           IDirect3DIndexBuffer9** ppIndexBuffer,
           HANDLE*                 pSharedHandle) {
+    TracePostResetCall("IDirect3DDevice9::CreateIndexBuffer");
     InitReturnPtr(ppIndexBuffer);
 
     if (unlikely(ppIndexBuffer == nullptr))
@@ -946,6 +996,7 @@ namespace dxvk {
           BOOL                Lockable,
           IDirect3DSurface9** ppSurface,
           HANDLE*             pSharedHandle) {
+    TracePostResetCall("IDirect3DDevice9::CreateRenderTarget");
     return CreateRenderTargetEx(
       Width,
       Height,
@@ -968,6 +1019,7 @@ namespace dxvk {
           BOOL                Discard,
           IDirect3DSurface9** ppSurface,
           HANDLE*             pSharedHandle) {
+    TracePostResetCall("IDirect3DDevice9::CreateDepthStencilSurface");
     return CreateDepthStencilSurfaceEx(
       Width,
       Height,
@@ -986,6 +1038,7 @@ namespace dxvk {
     const RECT*              pSourceRect,
           IDirect3DSurface9* pDestinationSurface,
     const POINT*             pDestPoint) {
+    TracePostResetCall("IDirect3DDevice9::UpdateSurface");
     D3D9DeviceLock lock = LockDevice();
 
     D3D9Surface* src = static_cast<D3D9Surface*>(pSourceSurface);
@@ -1064,6 +1117,7 @@ namespace dxvk {
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::UpdateTexture(
           IDirect3DBaseTexture9* pSourceTexture,
           IDirect3DBaseTexture9* pDestinationTexture) {
+    TracePostResetCall("IDirect3DDevice9::UpdateTexture");
     D3D9DeviceLock lock = LockDevice();
 
     if (!pDestinationTexture || !pSourceTexture)
@@ -1149,6 +1203,7 @@ namespace dxvk {
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::GetRenderTargetData(
           IDirect3DSurface9* pRenderTarget,
           IDirect3DSurface9* pDestSurface) {
+    TracePostResetCall("IDirect3DDevice9::GetRenderTargetData");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(IsDeviceLost())) {
@@ -1231,6 +1286,7 @@ namespace dxvk {
           IDirect3DSurface9*   pDestSurface,
     const RECT*                pDestRect,
           D3DTEXTUREFILTERTYPE Filter) {
+    TracePostResetCall("IDirect3DDevice9::StretchRect");
     D3D9DeviceLock lock = LockDevice();
 
     D3D9Surface* dst = static_cast<D3D9Surface*>(pDestSurface);
@@ -1492,6 +1548,7 @@ namespace dxvk {
           IDirect3DSurface9* pSurface,
     const RECT*              pRect,
           D3DCOLOR           Color) {
+    TracePostResetCall("IDirect3DDevice9::ColorFill");
     D3D9DeviceLock lock = LockDevice();
 
     D3D9Surface* dst = static_cast<D3D9Surface*>(pSurface);
@@ -1633,6 +1690,7 @@ namespace dxvk {
     D3DPOOL Pool,
     IDirect3DSurface9** ppSurface,
     HANDLE* pSharedHandle) {
+    TracePostResetCall("IDirect3DDevice9::CreateOffscreenPlainSurface");
     return CreateOffscreenPlainSurfaceEx(
       Width,     Height,
       Format,    Pool,
@@ -1643,6 +1701,7 @@ namespace dxvk {
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetRenderTarget(
           DWORD              RenderTargetIndex,
           IDirect3DSurface9* pRenderTarget) {
+    TracePostResetCall("IDirect3DDevice9::SetRenderTarget");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(pRenderTarget == nullptr && RenderTargetIndex == 0))
@@ -1774,6 +1833,7 @@ namespace dxvk {
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::GetRenderTarget(
           DWORD               RenderTargetIndex,
           IDirect3DSurface9** ppRenderTarget) {
+    TracePostResetCall("IDirect3DDevice9::GetRenderTarget");
     D3D9DeviceLock lock = LockDevice();
 
     InitReturnPtr(ppRenderTarget);
@@ -1791,6 +1851,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetDepthStencilSurface(IDirect3DSurface9* pNewZStencil) {
+    TracePostResetCall("IDirect3DDevice9::SetDepthStencilSurface");
     D3D9DeviceLock lock = LockDevice();
 
     D3D9Surface* ds = static_cast<D3D9Surface*>(pNewZStencil);
@@ -1825,6 +1886,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::GetDepthStencilSurface(IDirect3DSurface9** ppZStencilSurface) {
+    TracePostResetCall("IDirect3DDevice9::GetDepthStencilSurface");
     D3D9DeviceLock lock = LockDevice();
 
     InitReturnPtr(ppZStencilSurface);
@@ -1844,6 +1906,7 @@ namespace dxvk {
   // Some games don't even call them.
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::BeginScene() {
+    TracePostResetCall("IDirect3DDevice9::BeginScene");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(m_flags.test(D3D9DeviceFlag::InScene)))
@@ -1856,6 +1919,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::EndScene() {
+    TracePostResetCall("IDirect3DDevice9::EndScene");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(!m_flags.test(D3D9DeviceFlag::InScene)))
@@ -1893,6 +1957,7 @@ namespace dxvk {
           D3DCOLOR Color,
           float    Z,
           DWORD    Stencil) {
+    TracePostResetCall("IDirect3DDevice9::Clear");
     if (unlikely(!Count && pRects))
       return D3D_OK;
 
@@ -2295,6 +2360,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value) {
+    TracePostResetCall("IDirect3DDevice9::SetRenderState");
     D3D9DeviceLock lock = LockDevice();
 
     // D3D9 only allows reading for values 0 and 7-255 so we don't need to do anything but return OK
@@ -2782,6 +2848,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetTexture(DWORD Stage, IDirect3DBaseTexture9* pTexture) {
+    TracePostResetCall("IDirect3DDevice9::SetTexture");
     if (unlikely(InvalidSampler(Stage)))
       return D3D_OK;
 
@@ -2842,6 +2909,8 @@ namespace dxvk {
           DWORD               Sampler,
           D3DSAMPLERSTATETYPE Type,
           DWORD               Value) {
+    TracePostResetCall("IDirect3DDevice9::SetSamplerState");
+
     if (unlikely(InvalidSampler(Sampler)))
       return D3D_OK;
 
@@ -3005,6 +3074,7 @@ namespace dxvk {
           D3DPRIMITIVETYPE PrimitiveType,
           UINT             StartVertex,
           UINT             PrimitiveCount) {
+    TracePostResetCall("IDirect3DDevice9::DrawPrimitive");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(m_state.vertexDecl == nullptr))
@@ -3058,6 +3128,7 @@ namespace dxvk {
           UINT             NumVertices,
           UINT             StartIndex,
           UINT             PrimitiveCount) {
+    TracePostResetCall("IDirect3DDevice9::DrawIndexedPrimitive");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(m_state.vertexDecl == nullptr))
@@ -3110,6 +3181,7 @@ namespace dxvk {
           UINT             PrimitiveCount,
     const void*            pVertexStreamZeroData,
           UINT             VertexStreamZeroStride) {
+    TracePostResetCall("IDirect3DDevice9::DrawPrimitiveUP");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(m_state.vertexDecl == nullptr))
@@ -3163,6 +3235,7 @@ namespace dxvk {
           D3DFORMAT        IndexDataFormat,
     const void*            pVertexStreamZeroData,
           UINT             VertexStreamZeroStride) {
+    TracePostResetCall("IDirect3DDevice9::DrawIndexedPrimitiveUP");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(m_state.vertexDecl == nullptr))
@@ -3375,6 +3448,7 @@ namespace dxvk {
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::CreateVertexDeclaration(
     const D3DVERTEXELEMENT9*            pVertexElements,
           IDirect3DVertexDeclaration9** ppDecl) {
+    TracePostResetCall("IDirect3DDevice9::CreateVertexDeclaration");
     InitReturnPtr(ppDecl);
 
     if (unlikely(ppDecl == nullptr || pVertexElements == nullptr))
@@ -3399,6 +3473,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetVertexDeclaration(IDirect3DVertexDeclaration9* pDecl) {
+    TracePostResetCall("IDirect3DDevice9::SetVertexDeclaration");
     D3D9DeviceLock lock = LockDevice();
 
     D3D9VertexDecl* decl = static_cast<D3D9VertexDecl*>(pDecl);
@@ -3443,6 +3518,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetFVF(DWORD FVF) {
+    TracePostResetCall("IDirect3DDevice9::SetFVF");
     D3D9DeviceLock lock = LockDevice();
 
     if (FVF == 0)
@@ -3480,6 +3556,7 @@ namespace dxvk {
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::CreateVertexShader(
     const DWORD*                   pFunction,
           IDirect3DVertexShader9** ppShader) {
+    TracePostResetCall("IDirect3DDevice9::CreateVertexShader");
     // CreateVertexShader does not init the
     // return ptr unlike CreatePixelShader
 
@@ -3510,6 +3587,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetVertexShader(IDirect3DVertexShader9* pShader) {
+    TracePostResetCall("IDirect3DDevice9::SetVertexShader");
     D3D9DeviceLock lock = LockDevice();
 
     D3D9VertexShader* shader = static_cast<D3D9VertexShader*>(pShader);
@@ -3662,6 +3740,7 @@ namespace dxvk {
           IDirect3DVertexBuffer9* pStreamData,
           UINT                    OffsetInBytes,
           UINT                    Stride) {
+    TracePostResetCall("IDirect3DDevice9::SetStreamSource");
     D3D9DeviceLock lock = LockDevice();
 
     if (unlikely(StreamNumber >= caps::MaxStreams))
@@ -3798,6 +3877,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetIndices(IDirect3DIndexBuffer9* pIndexData) {
+    TracePostResetCall("IDirect3DDevice9::SetIndices");
     D3D9DeviceLock lock = LockDevice();
 
     D3D9IndexBuffer* buffer = static_cast<D3D9IndexBuffer*>(pIndexData);
@@ -3836,6 +3916,7 @@ namespace dxvk {
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::CreatePixelShader(
     const DWORD*                  pFunction,
           IDirect3DPixelShader9** ppShader) {
+    TracePostResetCall("IDirect3DDevice9::CreatePixelShader");
     InitReturnPtr(ppShader);
 
     if (unlikely(ppShader == nullptr))
@@ -3865,6 +3946,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetPixelShader(IDirect3DPixelShader9* pShader) {
+    TracePostResetCall("IDirect3DDevice9::SetPixelShader");
     D3D9DeviceLock lock = LockDevice();
 
     D3D9PixelShader* shader = static_cast<D3D9PixelShader*>(pShader);
@@ -4064,6 +4146,7 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::CreateQuery(D3DQUERYTYPE Type, IDirect3DQuery9** ppQuery) {
+    TracePostResetCall("IDirect3DDevice9::CreateQuery");
     HRESULT hr = D3D9Query::QuerySupported(this, Type);
 
     if (ppQuery == nullptr || hr != D3D_OK)
@@ -4202,6 +4285,7 @@ namespace dxvk {
           HWND hDestWindowOverride,
     const RGNDATA* pDirtyRegion,
           DWORD dwFlags) {
+    TracePostResetCall("IDirect3DDevice9Ex::PresentEx");
 
     if (m_cursor.IsSoftwareCursor()) {
       D3D9_SOFTWARE_CURSOR* pSoftwareCursor = m_cursor.GetSoftwareCursor();
