@@ -33,6 +33,38 @@
 
 namespace dxvk {
 
+  static const char* GetNg3reQueryTypeName(D3DQUERYTYPE type) {
+    switch (type) {
+      case D3DQUERYTYPE_VCACHE:             return "VCACHE";
+      case D3DQUERYTYPE_RESOURCEMANAGER:    return "RESOURCEMANAGER";
+      case D3DQUERYTYPE_VERTEXSTATS:        return "VERTEXSTATS";
+      case D3DQUERYTYPE_EVENT:              return "EVENT";
+      case D3DQUERYTYPE_OCCLUSION:          return "OCCLUSION";
+      case D3DQUERYTYPE_TIMESTAMP:          return "TIMESTAMP";
+      case D3DQUERYTYPE_TIMESTAMPDISJOINT:  return "TIMESTAMPDISJOINT";
+      case D3DQUERYTYPE_TIMESTAMPFREQ:      return "TIMESTAMPFREQ";
+      case D3DQUERYTYPE_PIPELINETIMINGS:    return "PIPELINETIMINGS";
+      case D3DQUERYTYPE_INTERFACETIMINGS:   return "INTERFACETIMINGS";
+      case D3DQUERYTYPE_VERTEXTIMINGS:      return "VERTEXTIMINGS";
+      case D3DQUERYTYPE_PIXELTIMINGS:       return "PIXELTIMINGS";
+      case D3DQUERYTYPE_BANDWIDTHTIMINGS:   return "BANDWIDTHTIMINGS";
+      case D3DQUERYTYPE_CACHEUTILIZATION:   return "CACHEUTILIZATION";
+      case D3DQUERYTYPE_MEMORYPRESSURE:     return "MEMORYPRESSURE";
+      default:                              return "UNKNOWN";
+    }
+  }
+
+
+  static const char* GetNg3reQueryResultName(HRESULT result) {
+    if (result == D3D_OK)
+      return "D3D_OK";
+    if (result == D3DERR_NOTAVAILABLE)
+      return "D3DERR_NOTAVAILABLE";
+    if (result == D3DERR_INVALIDCALL)
+      return "D3DERR_INVALIDCALL";
+    return "OTHER";
+  }
+
   D3D9DeviceEx::D3D9DeviceEx(
           D3D9InterfaceEx*       pParent,
           D3D9Adapter*           pAdapter,
@@ -216,14 +248,14 @@ namespace dxvk {
   }
 
 
-  ULONG STDMETHODCALLTYPE D3D9DeviceEx::AddRef() {
-    TracePostResetCall("IDirect3DDevice9::AddRef");
-    return ComObjectClamp<IDirect3DDevice9Ex>::AddRef();
-  }
-
-
   ULONG STDMETHODCALLTYPE D3D9DeviceEx::Release() {
-    TracePostResetCall("IDirect3DDevice9::Release");
+    if (m_ng3rePostResetTraceActive.load()
+     && !m_ng3reFirstReleaseObserved.exchange(true)) {
+      Logger::info(str::format(
+        "NG3RE_LIFECYCLE: first IDirect3DDevice9::Release after reset; references before release=",
+        m_refCount.load()));
+    }
+
     return ComObjectClamp<IDirect3DDevice9Ex>::Release();
   }
 
@@ -628,6 +660,7 @@ namespace dxvk {
       m_resetCtr++;
 
     m_ng3rePostResetTraceCount.store(0);
+    m_ng3reFirstReleaseObserved.store(false);
     m_ng3rePostResetTraceActive.store(true);
     Logger::info("NG3RE_TRACE: D3D9DeviceEx::Reset returning D3D_OK; post-reset call trace enabled");
     return D3D_OK;
@@ -4149,15 +4182,28 @@ namespace dxvk {
     TracePostResetCall("IDirect3DDevice9::CreateQuery");
     HRESULT hr = D3D9Query::QuerySupported(this, Type);
 
-    if (ppQuery == nullptr || hr != D3D_OK)
+    Logger::info(str::format(
+      "NG3RE_QUERY: type=", uint32_t(Type),
+      " (", GetNg3reQueryTypeName(Type), ")",
+      ", operation=", ppQuery != nullptr ? "create" : "probe",
+      ", support=", GetNg3reQueryResultName(hr),
+      " (", hr, ")"));
+
+    if (ppQuery == nullptr || hr != D3D_OK) {
+      Logger::info(str::format(
+        "NG3RE_QUERY: returning ", GetNg3reQueryResultName(hr),
+        " (", hr, ")"));
       return hr;
+    }
 
     try {
       *ppQuery = ref(new D3D9Query(this, Type));
+      Logger::info("NG3RE_QUERY: create returning D3D_OK");
       return D3D_OK;
     }
     catch (const DxvkError & e) {
       Logger::err(e.message());
+      Logger::info("NG3RE_QUERY: create returning D3DERR_NOTAVAILABLE after exception");
       return D3DERR_NOTAVAILABLE;
     }
   }

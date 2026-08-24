@@ -243,8 +243,6 @@ namespace dxvk {
 
     ~D3D9DeviceEx();
 
-    ULONG STDMETHODCALLTYPE AddRef();
-
     ULONG STDMETHODCALLTYPE Release();
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObject);
@@ -1688,6 +1686,7 @@ namespace dxvk {
 
     std::atomic<bool>               m_ng3rePostResetTraceActive = { false };
     std::atomic<uint32_t>           m_ng3rePostResetTraceCount  = { 0 };
+    std::atomic<bool>               m_ng3reFirstReleaseObserved = { false };
 
     D3D9SwapChainEx*                m_mostRecentlyUsedSwapchain = nullptr;
 
