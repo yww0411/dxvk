@@ -4,6 +4,29 @@
 
 namespace dxvk {
 
+  static const char* GetNg3reQueryStateName(D3D9_VK_QUERY_STATE state) {
+    switch (state) {
+      case D3D9_VK_QUERY_INITIAL: return "INITIAL";
+      case D3D9_VK_QUERY_BEGUN:   return "BEGUN";
+      case D3D9_VK_QUERY_ENDED:   return "ENDED";
+      case D3D9_VK_QUERY_CACHED:  return "CACHED";
+      default:                    return "UNKNOWN";
+    }
+  }
+
+
+  static const char* GetNg3reQueryMethodResultName(HRESULT result) {
+    if (result == D3D_OK)
+      return "D3D_OK";
+    if (result == S_FALSE)
+      return "S_FALSE";
+    if (result == D3DERR_INVALIDCALL)
+      return "D3DERR_INVALIDCALL";
+    if (result == D3DERR_DEVICELOST)
+      return "D3DERR_DEVICELOST";
+    return "OTHER";
+  }
+
   D3D9Query::D3D9Query(
         D3D9DeviceEx*      pDevice,
         D3DQUERYTYPE       QueryType)
@@ -74,6 +97,10 @@ namespace dxvk {
 
 
   DWORD STDMETHODCALLTYPE D3D9Query::GetDataSize() {
+    Logger::info(str::format(
+      "NG3RE_QUERY_METHOD: GetDataSize type=", uint32_t(m_queryType),
+      ", state=", GetNg3reQueryStateName(m_state)));
+
     switch (m_queryType) {
       case D3DQUERYTYPE_VCACHE:               return sizeof(D3DDEVINFO_VCACHE);
       case D3DQUERYTYPE_RESOURCEMANAGER:      return sizeof(D3DDEVINFO_RESOURCEMANAGER);
@@ -95,6 +122,11 @@ namespace dxvk {
 
 
   HRESULT STDMETHODCALLTYPE D3D9Query::Issue(DWORD dwIssueFlags) {
+    Logger::info(str::format(
+      "NG3RE_QUERY_METHOD: Issue type=", uint32_t(m_queryType),
+      ", flags=", dwIssueFlags,
+      ", state-before=", GetNg3reQueryStateName(m_state)));
+
     // Note: No need to submit to CS if we don't do anything!
 
     if (dwIssueFlags == D3DISSUE_BEGIN) {
@@ -122,17 +154,35 @@ namespace dxvk {
       m_state = D3D9_VK_QUERY_ENDED;
     }
 
+    Logger::info(str::format(
+      "NG3RE_QUERY_METHOD: Issue returning D3D_OK; type=", uint32_t(m_queryType),
+      ", state-after=", GetNg3reQueryStateName(m_state)));
     return D3D_OK;
   }
 
 
   HRESULT STDMETHODCALLTYPE D3D9Query::GetData(void* pData, DWORD dwSize, DWORD dwGetDataFlags) {
+    Logger::info(str::format(
+      "NG3RE_QUERY_METHOD: GetData type=", uint32_t(m_queryType),
+      ", size=", dwSize,
+      ", flags=", dwGetDataFlags,
+      ", has-output=", pData != nullptr ? "true" : "false",
+      ", state-before=", GetNg3reQueryStateName(m_state)));
+
+    auto returnResult = [&] (HRESULT result) {
+      Logger::info(str::format(
+        "NG3RE_QUERY_METHOD: GetData returning ", GetNg3reQueryMethodResultName(result),
+        " (", result, "); type=", uint32_t(m_queryType),
+        ", state-after=", GetNg3reQueryStateName(m_state)));
+      return result;
+    };
+
     D3D9DeviceLock lock = m_parent->LockDevice();
 
     bool flush = dwGetDataFlags & D3DGETDATA_FLUSH;
 
     if (unlikely(m_parent->IsDeviceLost())) {
-      return flush ? D3DERR_DEVICELOST : S_FALSE;
+      return returnResult(flush ? D3DERR_DEVICELOST : S_FALSE);
     }
 
     if (m_state == D3D9_VK_QUERY_CACHED) {
@@ -146,7 +196,7 @@ namespace dxvk {
           *static_cast<bool*>(pData) = true;
         }
       }
-      return D3D_OK;
+      return returnResult(D3D_OK);
     }
 
     HRESULT hr = this->GetQueryData(pData, dwSize);
@@ -158,7 +208,7 @@ namespace dxvk {
       m_parent->ConsiderFlush(GpuFlushType::ImplicitSynchronization);
     }
 
-    return hr;
+    return returnResult(hr);
   }
 
 
