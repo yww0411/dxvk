@@ -136,6 +136,8 @@ namespace dxvk {
 
     void DestroyBackBuffers();
 
+    bool RetireBackBuffersForReset();
+
     bool UpdateWindowCtx();
 
   private:
@@ -158,6 +160,7 @@ namespace dxvk {
     D3D9WindowContext*        m_wctx = nullptr;
 
     std::vector<Com<D3D9Surface, false>> m_backBuffers;
+    std::vector<Com<D3D9Surface, false>> m_retiredBackBuffers;
     
     RECT                      m_srcRect;
     RECT                      m_dstRect;

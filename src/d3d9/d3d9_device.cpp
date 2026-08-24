@@ -509,7 +509,8 @@ namespace dxvk {
     if (!IsExtended()) {
       // The internal references are always cleared, regardless of whether the Reset call succeeds.
       ResetState(pPresentationParameters);
-      m_implicitSwapchain->DestroyBackBuffers();
+      if (!m_implicitSwapchain->RetireBackBuffersForReset())
+        m_implicitSwapchain->DestroyBackBuffers();
       m_autoDepthStencil = nullptr;
 
       // Unbind all buffers that were still bound to the backend to avoid leaks.
